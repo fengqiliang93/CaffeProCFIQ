@@ -1,0 +1,7 @@
+******20191222*********
+1、nvcc -arch -code 参数要对应
+2、cudnn_conv_layer.cpp 中(size_t total_max_workspace = ...)之前要添加
+   ```
+   size_t m=32;
+   max_workspace = (max_workspace + m-1) / m * m;
+   ```
