@@ -1,0 +1,54 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "x86_64-linux",
+      "displayName": "x86_64 Linux",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/out/cmake/x86_64",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CFIQ_TARGET_ARCH": "x86_64",
+        "CFIQ_DEPS_ROOT": "${sourceDir}/deps/x86_64",
+        "CFIQ_STAGE_DIR": "${sourceDir}/out/x86_64-cmake"
+      }
+    },
+    {
+      "name": "aarch64-linux",
+      "displayName": "AArch64 Linux",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/out/cmake/aarch64",
+      "toolchainFile": "${sourceDir}/cmake/toolchains/aarch64-linux-gnu.cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CFIQ_TARGET_ARCH": "aarch64",
+        "CFIQ_DEPS_ROOT": "${sourceDir}/deps/aarch64",
+        "CFIQ_STAGE_DIR": "${sourceDir}/out/aarch64-cmake"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x86_64-linux",
+      "configurePreset": "x86_64-linux",
+      "jobs": 2
+    },
+    {
+      "name": "aarch64-linux",
+      "configurePreset": "aarch64-linux",
+      "jobs": 2
+    },
+    {
+      "name": "x86_64-linux-stage",
+      "configurePreset": "x86_64-linux",
+      "targets": ["stage_runtime"],
+      "jobs": 2
+    },
+    {
+      "name": "aarch64-linux-stage",
+      "configurePreset": "aarch64-linux",
+      "targets": ["stage_runtime"],
+      "jobs": 2
+    }
+  ]
+}

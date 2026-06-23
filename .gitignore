@@ -1,0 +1,15 @@
+*.co
+*.cu
+*.o
+build/libQualityCtrl.so
+test_cfiq/build/FingerQualityCtrlTest
+test_cfiq/build/lib*.so*
+*.bmp
+!/test_cfiq/build/SourceBmpLinux/*.bmp
+!/test_cfiq/build/QualityBmpLinux/*.bmp
+!/test_cfiq/build/SourceBmpLinuxTest36/*.bmp
+out/
+protobuf-*.tar.gz
+protobuf-*/
+deps/*/build-cache/
+deps/aarch64/
