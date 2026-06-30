@@ -14,6 +14,8 @@ aarch64-cmake/
 │   ├── libnirvana-kernel.so.8
 │   ├── libnirvana-kernel.so.8.15.1
 │   ├── libopenblas.so.0
+│   ├── libblas.so.3
+│   ├── liblapack.so.3
 │   ├── libopencv_core.so.406
 │   ├── libopencv_imgcodecs.so.406
 │   ├── libopencv_imgproc.so.406
@@ -42,6 +44,7 @@ aarch64-cmake/
 - `libQualityCtrl.so` 本体需要到 `GLIBC_2.34`。
 - 运行机器不要求安装 gcc/g++ 编译器，但系统 C/C++ 运行时必须满足上述版本。
 - OpenCV、protobuf、OpenBLAS、nirvana kernel 等运行库已随包放在 `lib/` 下，不要求系统额外安装。
+- `libblas.so.3` 和 `liblapack.so.3` 必须优先解析到随包 OpenBLAS；否则可能落到系统参考 BLAS，导致 ARM 推理速度显著下降。
 
 环境检查：
 
