@@ -12,4 +12,3 @@ out/
 protobuf-*.tar.gz
 protobuf-*/
 deps/*/build-cache/
-deps/aarch64/
