@@ -204,6 +204,7 @@ deps/aarch64/
 ```
 
 ARM 依赖包内所有 `.so` 必须是 ARM64 Linux 二进制，不能混用 x86_64 动态库。
+发布目录中的 `libblas.so.3` 和 `liblapack.so.3` 应指向随包 OpenBLAS，避免运行时解析到系统参考 BLAS 造成明显性能下降。
 
 ### 4.3 libnirvana-kernel 一致性要求
 
@@ -316,6 +317,8 @@ out/aarch64-cmake/
 │   ├── libnirvana-kernel.so.8
 │   ├── libnirvana-kernel.so.8.15.1
 │   ├── libopenblas.so.0
+│   ├── libblas.so.3
+│   ├── liblapack.so.3
 │   ├── libopencv_core.so.406
 │   └── ...
 └── test/
