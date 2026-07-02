@@ -9,6 +9,8 @@
 #include<cstdlib>
 #include<cstring>
 #include<cstdio>
+#include<vector>
+#include<chrono>
 
 #include<opencv2/core/core.hpp>
 #include<opencv2/highgui/highgui.hpp>
@@ -28,9 +30,47 @@ static bool TraceQualityModeSix()
 	return traceQualityEnv != NULL && strcmp(traceQualityEnv, "1") == 0;
 }
 
+static bool ProfileQualityModeSix()
+{
+	const char *profileQualityEnv = getenv("CFIQ_PROFILE_QUALITY6");
+	return profileQualityEnv != NULL && strcmp(profileQualityEnv, "1") == 0;
+}
+
+static double QualityModeSixElapsedMs(const std::chrono::steady_clock::time_point &begin,
+                                      const std::chrono::steady_clock::time_point &end)
+{
+	return std::chrono::duration<double, std::milli>(end - begin).count();
+}
+
+static void CopyPatchToBuffer(const cv::Mat &srcBmpFloatMat,
+                              int row,
+                              int col,
+                              int localSize,
+                              float *dst)
+{
+	for (int r = 0; r < localSize; ++r)
+	{
+		const float *srcRow = srcBmpFloatMat.ptr<float>(row + r) + col;
+		memcpy(dst + r * localSize, srcRow, sizeof(float) * localSize);
+	}
+}
+
 void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMapFloat, void *pCaffeNet, void *pHInstance, void *pQuality, unsigned char *srcBmp, int width, int height, int fgp, int Core_X, int Core_Y, int localSize, int stepSize, float *QualityScore)
 {
 		const bool traceQuality = TraceQualityModeSix();
+		const bool profileQuality = ProfileQualityModeSix();
+		double msMemset = 0.0;
+		double msExtractForeground = 0.0;
+		double msConvert = 0.0;
+		double msGetCutInfo = 0.0;
+		double msInitMats = 0.0;
+		double msCopyPatch = 0.0;
+		double msForward = 0.0;
+		double msHeatMapMean = 0.0;
+		double msRankMat = 0.0;
+		double msFinalMean = 0.0;
+		const std::chrono::steady_clock::time_point profileBegin =
+		    std::chrono::steady_clock::now();
 		if (traceQuality)
 		{
 			fprintf(stderr, "[quality-six] begin fgp=%d core=(%d,%d) local=%d step=%d\n", fgp, Core_X, Core_Y, localSize, stepSize);
@@ -53,35 +93,55 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 
 		Net<float> *pNet = (Net<float> *)pCaffeNet;
 		unsigned char *pForegroundBuffer = (unsigned char *)pForeground;
-		unsigned char *pQualityImageBuffer = (unsigned char *)pQuality;
 		RowColPairStruct *pRowColPairStruct = (RowColPairStruct *)pRowColPair;
+		std::chrono::steady_clock::time_point profileStepBegin =
+		    std::chrono::steady_clock::now();
 		memset(pRowColPairStruct, 0, sizeof(RowColPairStruct) * width * height);
+		if (profileQuality)
+		{
+			msMemset += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+		}
 
 
 		if (traceQuality)
 		{
 			fprintf(stderr, "[quality-six] extract-foreground\n");
 		}
+		profileStepBegin = std::chrono::steady_clock::now();
 		if (!ExtractForeground(pHInstance, srcBmp, width, height, fgp, pForegroundBuffer))
 			return;
+		if (profileQuality)
+		{
+			msExtractForeground += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+		}
 		if (traceQuality)
 		{
 			fprintf(stderr, "[quality-six] foreground-ready\n");
 		}
 		
+		profileStepBegin = std::chrono::steady_clock::now();
 		cv::Mat srcBmpMat(width, height, CV_8UC1, srcBmp);
 		//cv::imwrite(".\\srcbmp\\" + string(pPersonID) + "_" + to_string(fgp) + "_" + "src" + ".bmp", srcBmpMat);
 		//cv::Mat_<float> srcBmpFloatMat = srcBmpMat * 1.0f / 255.0f;
 		cv::Mat srcBmpFloatMat(width, height, CV_32FC1);
 		srcBmpMat.convertTo(srcBmpFloatMat, CV_32FC1);
 		srcBmpFloatMat = srcBmpFloatMat * 1.0f / 255.0f;
+		if (profileQuality)
+		{
+			msConvert += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+		}
 
 
 		cv::Mat ForegroundBufferMat(width, height, CV_8UC1, pForegroundBuffer);
 		//cv::imwrite(".\\bmp\\" + string(pPersonID) + "_" + to_string(fgp) + "_" + "foreground" + ".bmp", ForegroundBufferMat * 255);
 		int localRankNum = 0;
 
+		profileStepBegin = std::chrono::steady_clock::now();
 		GetCutInfo(ForegroundBufferMat.data, width, height, localSize, stepSize, pRowColPairStruct, &localRankNum);
+		if (profileQuality)
+		{
+			msGetCutInfo += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+		}
 		if (traceQuality)
 		{
 			fprintf(stderr, "[quality-six] cut-info localRankNum=%d\n", localRankNum);
@@ -89,18 +149,19 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 
 		Blob<float> *input_blobs = pNet->input_blobs()[0];
 		Blob<float> *output_blobs = pNet->output_blobs()[0];
-		const float *pCpuData = output_blobs->cpu_data();
 		if (traceQuality)
 		{
 			fprintf(stderr, "[quality-six] blob-shape input_count=%d output_channels=%d\n", input_blobs->count(), output_blobs->channels());
 		}
 
-		Mat localRankMat(48, 48, CV_32FC1);
-		Mat BadRankMat = cv::Mat::zeros(height, width, CV_8UC1);
-		Mat MiddleRankMat = cv::Mat::zeros(height, width, CV_8UC1);
-		Mat GoodRankMat = cv::Mat::zeros(height, width, CV_8UC1);
-		Mat TotalRankMat = cv::Mat::zeros(height, width, CV_8UC1);
+		const int localArea = localSize * localSize;
+		profileStepBegin = std::chrono::steady_clock::now();
+		std::vector<float> localRankBuffer(localArea);
 		cv::Mat_<float> QualityBmpMat(width, height, (float *)pHeatMapFloat + (fgp - 1) * 640 * 640);
+		if (profileQuality)
+		{
+			msInitMats += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+		}
 
 		int rowMinPosition = 0, colMinPosition = 0;
 		float heatMap = 0.0f, score = 0.0f;
@@ -109,18 +170,33 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 		{
 			rowMinPosition = pRowColPairStruct[localRankCount].RowID - y_correct;
 			colMinPosition = pRowColPairStruct[localRankCount].ColID - x_correct;
-
-			localRankMat = srcBmpFloatMat(Range(pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].RowID + localSize), Range(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].ColID + localSize)).clone();
-			input_blobs->set_cpu_data((float *)localRankMat.data);
+			profileStepBegin = std::chrono::steady_clock::now();
+			CopyPatchToBuffer(srcBmpFloatMat,
+			                  pRowColPairStruct[localRankCount].RowID,
+			                  pRowColPairStruct[localRankCount].ColID,
+			                  localSize,
+			                  &localRankBuffer[0]);
+			if (profileQuality)
+			{
+				msCopyPatch += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+			}
+			input_blobs->set_cpu_data(&localRankBuffer[0]);
 			if (traceQuality && (localRankCount == 0 || (localRankCount + 1) % 25 == 0 || localRankCount + 1 == localRankNum))
 			{
 				fprintf(stderr, "[quality-six] forward-begin %d/%d row=%d col=%d\n", localRankCount + 1, localRankNum, pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].ColID);
 			}
+			profileStepBegin = std::chrono::steady_clock::now();
 			pNet->Forward();
+			if (profileQuality)
+			{
+				msForward += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+			}
 			if (traceQuality && (localRankCount == 0 || (localRankCount + 1) % 25 == 0 || localRankCount + 1 == localRankNum))
 			{
 				fprintf(stderr, "[quality-six] forward-end %d/%d\n", localRankCount + 1, localRankNum);
 			}
+
+			const float *pCpuData = output_blobs->cpu_data();
 			int  maxChannel = 0;
 			for (int channelNum = 1; channelNum < output_blobs->channels(); channelNum++)
 			{
@@ -134,31 +210,34 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 			{
 				if (pRowColPairStruct[localRankCount].Rank == 1)
 				{
+					profileStepBegin = std::chrono::steady_clock::now();
 					heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
+					if (profileQuality)
+					{
+						msHeatMapMean += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+					}
 					score += 1 * heatMap;
 				}
 				else if (pRowColPairStruct[localRankCount].Rank == 2)
 				{
+					profileStepBegin = std::chrono::steady_clock::now();
 					heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
+					if (profileQuality)
+					{
+						msHeatMapMean += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+					}
 					score += 2 * heatMap;
 				}
 				else if (pRowColPairStruct[localRankCount].Rank == 3)
 				{
+					profileStepBegin = std::chrono::steady_clock::now();
 					heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
+					if (profileQuality)
+					{
+						msHeatMapMean += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+					}
 					score += 3 * heatMap;
 				}
-			}
-			if (pRowColPairStruct[localRankCount].Rank == 1)
-			{
-				BadRankMat(Range(pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].RowID + localSize), Range(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].ColID + localSize)) += 1;
-			}
-			else if (pRowColPairStruct[localRankCount].Rank == 2)
-			{
-				MiddleRankMat(Range(pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].RowID + localSize), Range(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].ColID + localSize)) += 1;
-			}
-			else if (pRowColPairStruct[localRankCount].Rank == 3)
-			{
-				GoodRankMat(Range(pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].RowID + localSize), Range(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].ColID + localSize)) += 1;
 			}
 		}
 		//计算矫正后图像剩余大小，计算分数考虑前景面积所占比例的因素
@@ -185,7 +264,12 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 			x_EndCol = width + x_correct;
 		}
 		//float meanHeatMap = 0.0f;
+		profileStepBegin = std::chrono::steady_clock::now();
 		float meanHeatMap = cv::mean(QualityBmpMat(Range(y_BegRow, y_EndRow), Range(x_BegCol, x_EndCol)))[0];
+		if (profileQuality)
+		{
+			msFinalMean += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
+		}
 		int TotalCut = ((y_EndRow - y_BegRow - localSize) / stepSize + 1 + 1) * ((x_EndCol - x_BegCol - localSize) / stepSize + 1 + 1); //适当增大切割数
 		if (abs(meanHeatMap) > 1e-6 && TotalCut > 0)
 		{
@@ -200,5 +284,23 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 		if (traceQuality)
 		{
 			fprintf(stderr, "[quality-six] done score=%.9g totalCut=%d meanHeatMap=%.9g\n", *QualityScore, TotalCut, meanHeatMap);
+		}
+		if (profileQuality)
+		{
+			const double msTotal = QualityModeSixElapsedMs(profileBegin, std::chrono::steady_clock::now());
+			fprintf(stderr,
+			        "[quality6-profile] total_ms=%.6f localRankNum=%d memset=%.6f extract=%.6f convert=%.6f cut=%.6f init_mats=%.6f copy_patch=%.6f forward=%.6f heatmap_mean=%.6f rank_mat=%.6f final_mean=%.6f\n",
+			        msTotal,
+			        localRankNum,
+			        msMemset,
+			        msExtractForeground,
+			        msConvert,
+			        msGetCutInfo,
+			        msInitMats,
+			        msCopyPatch,
+			        msForward,
+			        msHeatMapMean,
+			        msRankMat,
+			        msFinalMean);
 		}
 }

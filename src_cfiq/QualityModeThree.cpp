@@ -6,6 +6,10 @@
  */
 #include<iostream>
 #include<string>
+#include<algorithm>
+#include<cstdlib>
+#include<cstring>
+#include<vector>
 
 #include<opencv2/core/core.hpp>
 #include<opencv2/highgui/highgui.hpp>
@@ -19,13 +23,71 @@ using namespace cv;
 using namespace caffe;
 using namespace std;
 
+static bool TraceQualityModeThree()
+{
+	const char *traceQualityEnv = getenv("CFIQ_TRACE_QUALITY3");
+	return traceQualityEnv != NULL && strcmp(traceQualityEnv, "1") == 0;
+}
+
+static void CopyPatchToBufferModeThree(const cv::Mat &srcBmpFloatMat,
+                                       int row,
+                                       int col,
+                                       int localSize,
+                                       float *dst)
+{
+	for (int r = 0; r < localSize; ++r)
+	{
+		const float *srcRow = srcBmpFloatMat.ptr<float>(row + r) + col;
+		memcpy(dst + r * localSize, srcRow, sizeof(float) * localSize);
+	}
+}
+
+static void DrawPatchGridModeThree(cv::Mat &qualityMat,
+                                   const RowColPairStruct *rowColPairs,
+                                   int localRankNum,
+                                   int localSize)
+{
+	const int width = qualityMat.cols;
+	const int height = qualityMat.rows;
+
+	for (int localRankCount = 0; localRankCount < localRankNum; localRankCount++)
+	{
+		if (!rowColPairs[localRankCount].boolForecast)
+			continue;
+
+		const int col = static_cast<int>(rowColPairs[localRankCount].ColID);
+		const int row = static_cast<int>(rowColPairs[localRankCount].RowID);
+		const int x0 = std::max(0, col);
+		const int y0 = std::max(0, row);
+		const int x1 = std::min(width - 1, col + localSize);
+		const int y1 = std::min(height - 1, row + localSize);
+		if (x0 > x1 || y0 > y1)
+			continue;
+
+		memset(qualityMat.ptr<uchar>(y0) + x0 * 3, 0, (x1 - x0 + 1) * 3);
+		memset(qualityMat.ptr<uchar>(y1) + x0 * 3, 0, (x1 - x0 + 1) * 3);
+		for (int y = y0; y <= y1; y++)
+		{
+			uchar *rowPtr = qualityMat.ptr<uchar>(y);
+			memset(rowPtr + x0 * 3, 0, 3);
+			memset(rowPtr + x1 * 3, 0, 3);
+		}
+	}
+}
+
 /*
 * （矫正条件下，用热图数据，算分数）（画完整前景质量图, 原位置不加矫正显示）
 */
 void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeatMapFloat, void *pCaffeNet, void *pHInstance, void *pQuality, unsigned char *srcBmp, int width, int height, int fgp, int Core_X, int Core_Y, int localSize, int stepSize, float *QualityScore)
 {
+	const bool traceQuality = TraceQualityModeThree();
 	int x_correct = Core_X - 320;
 	int y_correct = Core_Y - 256;
+	if (Core_X == 0 && Core_Y == 0)
+	{
+		x_correct = 0;
+		y_correct = 0;
+	}
 
 	if (pCaffeNet == NULL)
 	{
@@ -44,6 +106,9 @@ void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeat
 	unsigned char *pForegroundBuffer = (unsigned char *)pForeground;
 	unsigned char *pQualityImageBuffer = (unsigned char *)pQuality;
 	RowColPairStruct *pRowColPairStruct = (RowColPairStruct *)pRowColPair;
+	*QualityScore = 0.0f;
+	memset(pQualityImageBuffer, 0, width * height * 3);
+	memset(pRowColPairStruct, 0, sizeof(RowColPairStruct) * width * height);
 
 
 	if (!ExtractForeground(pHInstance, srcBmp, width, height, fgp, pForegroundBuffer))
@@ -62,11 +127,15 @@ void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeat
 	int localRankNum = 0;
 
 	GetCutInfo(ForegroundBufferMat.data, width, height, localSize, stepSize, pRowColPairStruct, &localRankNum);
+	if (traceQuality)
+	{
+		fprintf(stderr, "[quality-three] core=(%d,%d) corrected=(%d,%d) localRankNum=%d\n", Core_X, Core_Y, x_correct, y_correct, localRankNum);
+	}
 
 	Blob<float> *input_blobs = pNet->input_blobs()[0];
 	Blob<float> *output_blobs = pNet->output_blobs()[0];
 		
-	Mat localRankMat(48, 48, CV_32FC1);
+	std::vector<float> localRankBuffer(localSize * localSize);
 	Mat BadRankMat = cv::Mat::zeros(height, width, CV_8UC1);
 	Mat MiddleRankMat = cv::Mat::zeros(height, width, CV_8UC1);
 	Mat GoodRankMat = cv::Mat::zeros(height, width, CV_8UC1);
@@ -81,11 +150,12 @@ void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeat
 		rowMinPosition = pRowColPairStruct[localRankCount].RowID - y_correct;
 		colMinPosition = pRowColPairStruct[localRankCount].ColID - x_correct;
 
-		localRankMat = srcBmpFloatMat(Range(pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].RowID + localSize), Range(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].ColID + localSize)).clone();
-		
- 		//printf("%ld\n",reinterpret_cast<long int>((float *)localRankMat.data));
-		//printf("%p\n",localRankMat.data);
-		input_blobs->set_cpu_data((float *)localRankMat.data);
+		CopyPatchToBufferModeThree(srcBmpFloatMat,
+		                           pRowColPairStruct[localRankCount].RowID,
+		                           pRowColPairStruct[localRankCount].ColID,
+		                           localSize,
+		                           &localRankBuffer[0]);
+		input_blobs->set_cpu_data(&localRankBuffer[0]);
 		pNet->Forward();
        
 		const float *pCpuData = output_blobs->cpu_data();
@@ -156,6 +226,7 @@ void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeat
 	//float meanHeatMap = 0.0f;
 	float meanHeatMap = cv::mean(QualityBmpMat(Range(y_BegRow, y_EndRow), Range(x_BegCol, x_EndCol)))[0];
 	int TotalCut = ((y_EndRow - y_BegRow - localSize) / stepSize + 1 + 1) * ((x_EndCol - x_BegCol - localSize) / stepSize + 1 + 1); //适当增大切割数 
+	TotalCut = std::max(TotalCut, localRankNum);
 	if (abs(meanHeatMap) > 1e-6 && TotalCut > 0)
 	{
 		*QualityScore = score / (3 * TotalCut * meanHeatMap);
@@ -189,14 +260,6 @@ void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeat
 			else{}
 		}
 	}
-	for (int localRankCount = 0; localRankCount < localRankNum; localRankCount++)
-	{
-
-		if (pRowColPairStruct[localRankCount].boolForecast == true)
-		{
-			rectangle(QualityMat, Point(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].RowID), Point(pRowColPairStruct[localRankCount].ColID + localSize, pRowColPairStruct[localRankCount].RowID + localSize), Scalar(0, 0, 0), 1);
-		}
-	}
+	DrawPatchGridModeThree(QualityMat, pRowColPairStruct, localRankNum, localSize);
 	memcpy(pQualityImageBuffer, QualityMat.data, width * height * 3);
 }
-

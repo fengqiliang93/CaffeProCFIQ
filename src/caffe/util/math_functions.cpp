@@ -2,12 +2,76 @@
 #include <boost/random.hpp>
 
 #include <limits>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 
 #include "caffe/common.hpp"
 #include "caffe/util/math_functions.hpp"
 #include "caffe/util/rng.hpp"
 
 namespace caffe {
+
+namespace {
+
+struct BlasProfileStats {
+  long long sgemm_calls;
+  long long sgemm_ops;
+  double sgemm_ms;
+  long long dgemm_calls;
+  long long dgemm_ops;
+  double dgemm_ms;
+  long long sgemv_calls;
+  long long sgemv_ops;
+  double sgemv_ms;
+  long long dgemv_calls;
+  long long dgemv_ops;
+  double dgemv_ms;
+};
+
+BlasProfileStats& MutableBlasProfileStats() {
+  static BlasProfileStats stats = {};
+  return stats;
+}
+
+bool ProfileBlas() {
+  const char* env = std::getenv("CFIQ_PROFILE_BLAS");
+  return env != NULL && env[0] == '1' && env[1] == '\0';
+}
+
+double BlasElapsedMs(
+    const std::chrono::steady_clock::time_point& begin,
+    const std::chrono::steady_clock::time_point& end) {
+  return std::chrono::duration<double, std::milli>(end - begin).count();
+}
+
+void PrintBlasProfileStats() {
+  BlasProfileStats& stats = MutableBlasProfileStats();
+  fprintf(stderr,
+      "[blas-profile] sgemm calls=%lld ops=%lld ms=%.6f dgemm calls=%lld ops=%lld ms=%.6f sgemv calls=%lld ops=%lld ms=%.6f dgemv calls=%lld ops=%lld ms=%.6f\n",
+      stats.sgemm_calls,
+      stats.sgemm_ops,
+      stats.sgemm_ms,
+      stats.dgemm_calls,
+      stats.dgemm_ops,
+      stats.dgemm_ms,
+      stats.sgemv_calls,
+      stats.sgemv_ops,
+      stats.sgemv_ms,
+      stats.dgemv_calls,
+      stats.dgemv_ops,
+      stats.dgemv_ms);
+}
+
+void EnsureBlasProfileReporter() {
+  static bool registered = false;
+  if (!registered) {
+    std::atexit(PrintBlasProfileStats);
+    registered = true;
+  }
+}
+
+}
 
 template<>
 void caffe_cpu_gemm<float>(const CBLAS_TRANSPOSE TransA,
@@ -16,8 +80,20 @@ void caffe_cpu_gemm<float>(const CBLAS_TRANSPOSE TransA,
     float* C) {
   int lda = (TransA == CblasNoTrans) ? K : M;
   int ldb = (TransB == CblasNoTrans) ? N : K;
+  const bool profile = ProfileBlas();
+  std::chrono::steady_clock::time_point begin;
+  if (profile) {
+    EnsureBlasProfileReporter();
+    begin = std::chrono::steady_clock::now();
+  }
   cblas_sgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B,
       ldb, beta, C, N);
+  if (profile) {
+    BlasProfileStats& stats = MutableBlasProfileStats();
+    ++stats.sgemm_calls;
+    stats.sgemm_ops += static_cast<long long>(M) * N * K;
+    stats.sgemm_ms += BlasElapsedMs(begin, std::chrono::steady_clock::now());
+  }
 }
 
 template<>
@@ -27,22 +103,58 @@ void caffe_cpu_gemm<double>(const CBLAS_TRANSPOSE TransA,
     double* C) {
   int lda = (TransA == CblasNoTrans) ? K : M;
   int ldb = (TransB == CblasNoTrans) ? N : K;
+  const bool profile = ProfileBlas();
+  std::chrono::steady_clock::time_point begin;
+  if (profile) {
+    EnsureBlasProfileReporter();
+    begin = std::chrono::steady_clock::now();
+  }
   cblas_dgemm(CblasRowMajor, TransA, TransB, M, N, K, alpha, A, lda, B,
       ldb, beta, C, N);
+  if (profile) {
+    BlasProfileStats& stats = MutableBlasProfileStats();
+    ++stats.dgemm_calls;
+    stats.dgemm_ops += static_cast<long long>(M) * N * K;
+    stats.dgemm_ms += BlasElapsedMs(begin, std::chrono::steady_clock::now());
+  }
 }
 
 template <>
 void caffe_cpu_gemv<float>(const CBLAS_TRANSPOSE TransA, const int M,
     const int N, const float alpha, const float* A, const float* x,
     const float beta, float* y) {
+  const bool profile = ProfileBlas();
+  std::chrono::steady_clock::time_point begin;
+  if (profile) {
+    EnsureBlasProfileReporter();
+    begin = std::chrono::steady_clock::now();
+  }
   cblas_sgemv(CblasRowMajor, TransA, M, N, alpha, A, N, x, 1, beta, y, 1);
+  if (profile) {
+    BlasProfileStats& stats = MutableBlasProfileStats();
+    ++stats.sgemv_calls;
+    stats.sgemv_ops += static_cast<long long>(M) * N;
+    stats.sgemv_ms += BlasElapsedMs(begin, std::chrono::steady_clock::now());
+  }
 }
 
 template <>
 void caffe_cpu_gemv<double>(const CBLAS_TRANSPOSE TransA, const int M,
     const int N, const double alpha, const double* A, const double* x,
     const double beta, double* y) {
+  const bool profile = ProfileBlas();
+  std::chrono::steady_clock::time_point begin;
+  if (profile) {
+    EnsureBlasProfileReporter();
+    begin = std::chrono::steady_clock::now();
+  }
   cblas_dgemv(CblasRowMajor, TransA, M, N, alpha, A, N, x, 1, beta, y, 1);
+  if (profile) {
+    BlasProfileStats& stats = MutableBlasProfileStats();
+    ++stats.dgemv_calls;
+    stats.dgemv_ops += static_cast<long long>(M) * N;
+    stats.dgemv_ms += BlasElapsedMs(begin, std::chrono::steady_clock::now());
+  }
 }
 
 template <>

@@ -11,6 +11,8 @@
 #include<string.h>
 #include<fstream>
 #include<cstdlib>
+#include<sys/stat.h>
+#include<sys/types.h>
 #include"MakeBmp.h"
 #include"ExtractMnt.h"
 #include "ScanNSortDirectory.h"
@@ -40,6 +42,16 @@ typedef struct
 	char *pCaffeModelPath;
         int mode;
 } ParaStruct;
+
+static void EnsureDirectory(const char *path)
+{
+	struct stat st;
+	if (stat(path, &st) == 0 && S_ISDIR(st.st_mode))
+	{
+		return;
+	}
+	mkdir(path, 0755);
+}
 
 void * MultiThreadFunc(void *para)
 {
@@ -101,6 +113,8 @@ void * MultiThreadFunc(void *para)
         }
         else
         {
+            EnsureDirectory("./SourceBmpLinux");
+            EnsureDirectory("./QualityBmpLinux");
             MakeGrayBmp(pImageBuffer, 640, 640, true, string("./SourceBmpLinux/" + PersonID).c_str());
             GetQualityScore(pForeGroundBuffer, pRowColPairStruct, pHeatMapFloat, pCaffeNet, pHInstance, pQuality, pImageBuffer, 640, 640, atoi(FGP.c_str()), cCol, cRow, 48, 16, pParaStruct->mode, &QualityScore);
             MakeRGBBmp((unsigned char *)pQuality, 640, 640, true, string("./QualityBmpLinux/" + PersonID).c_str());

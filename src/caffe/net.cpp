@@ -4,6 +4,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <chrono>
+#include <cstdlib>
+#include <cstdio>
 
 #ifdef USE_HDF5
 #include "hdf5.h"
@@ -22,6 +25,21 @@
 using namespace std;
 
 namespace caffe {
+
+namespace {
+
+bool ProfileCaffeForward() {
+  const char* env = std::getenv("CFIQ_PROFILE_CAFFE");
+  return env != NULL && env[0] == '1' && env[1] == '\0';
+}
+
+double CaffeProfileElapsedMs(
+    const std::chrono::steady_clock::time_point& begin,
+    const std::chrono::steady_clock::time_point& end) {
+  return std::chrono::duration<double, std::milli>(end - begin).count();
+}
+
+}
 
 template <typename Dtype>
 Net<Dtype>::Net(const NetParameter& param) {
@@ -526,18 +544,45 @@ Dtype Net<Dtype>::ForwardFromTo(int start, int end) {
   //CHECK_GE(start, 0);
   //CHECK_LT(end, layers_.size());
   Dtype loss = 0;
+  const bool profile = ProfileCaffeForward();
+  double total_ms = 0.0;
+  if (profile) {
+    fprintf(stderr, "[caffe-profile] forward begin start=%d end=%d layers=%d\n",
+        start, end, static_cast<int>(layers_.size()));
+  }
   for (int i = start; i <= end; ++i) {
     for (int c = 0; c < before_forward_.size(); ++c) {
       before_forward_[c]->run(i);
     }
     
+    const std::chrono::steady_clock::time_point layer_begin =
+        std::chrono::steady_clock::now();
     Dtype layer_loss = layers_[i]->Forward(bottom_vecs_[i], top_vecs_[i]);
+    const std::chrono::steady_clock::time_point layer_end =
+        std::chrono::steady_clock::now();
+    if (profile) {
+      const double layer_ms = CaffeProfileElapsedMs(layer_begin, layer_end);
+      total_ms += layer_ms;
+      const LayerParameter& layer_param = layers_[i]->layer_param();
+      fprintf(stderr,
+          "[caffe-profile] layer index=%d name=%s type=%s ms=%.6f bottom0_count=%d top0_count=%d\n",
+          i,
+          layer_param.name().c_str(),
+          layers_[i]->type(),
+          layer_ms,
+          bottom_vecs_[i].empty() ? 0 : bottom_vecs_[i][0]->count(),
+          top_vecs_[i].empty() ? 0 : top_vecs_[i][0]->count());
+    }
     //printf("%s\n",layer_names_[i].c_str());
     loss += layer_loss;
     //if (debug_info_) { ForwardDebugInfo(i); }
     for (int c = 0; c < after_forward_.size(); ++c) {
       after_forward_[c]->run(i);
     }
+  }
+  if (profile) {
+    fprintf(stderr, "[caffe-profile] forward end total_layer_ms=%.6f\n",
+        total_ms);
   }
   return loss;
 }

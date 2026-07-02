@@ -4,11 +4,11 @@
 #include <cstring>
 #include <dlfcn.h>
 
-typedef void (*pGAFIS_ExtractBack)(unsigned char *bufferPix,
-                                   int width,
-                                   int height,
-                                   int fgp,
-                                   unsigned char *foreGroundBuffer);
+typedef int (*pGAFIS_ExtractBack)(unsigned char *bufferPix,
+                                  int width,
+                                  int height,
+                                  int fgp,
+                                  unsigned char *foreGroundBuffer);
 
 bool ExtractForeground(void *pHInstance,
                        unsigned char *bufferPix,
@@ -29,6 +29,11 @@ bool ExtractForeground(void *pHInstance,
     }
 
     memset(foreGroundBuffer, 0, width * height);
-    GAFIS_ExtractBack(bufferPix, width, height, fgp, foreGroundBuffer);
+    const int ret = GAFIS_ExtractBack(bufferPix, width, height, fgp, foreGroundBuffer);
+    if (ret < 0)
+    {
+        fprintf(stderr, "GAFIS_ExtractBack failed: %d\n", ret);
+        return false;
+    }
     return true;
 }

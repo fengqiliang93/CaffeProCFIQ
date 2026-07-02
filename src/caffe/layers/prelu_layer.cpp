@@ -1,6 +1,10 @@
 #include <algorithm>
 #include <vector>
 
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 #include "caffe/filler.hpp"
 
 #include "caffe/layers/neuron_layer.hpp"
@@ -78,13 +82,69 @@ void PReLULayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     caffe_copy(count, bottom_data, bottom_memory_.mutable_cpu_data());
   }
 
-  // if channel_shared, channel index in the following computation becomes
-  // always zero.
-  const int div_factor = channel_shared_ ? channels : 1;
-  for (int i = 0; i < count; ++i) {
-    int c = (i / dim) % channels / div_factor;
-    top_data[i] = std::max(bottom_data[i], Dtype(0))
-        + slope_data[c] * std::min(bottom_data[i], Dtype(0));
+  if (channel_shared_) {
+    const Dtype slope = slope_data[0];
+#if defined(__aarch64__)
+    if (sizeof(Dtype) == sizeof(float)) {
+      const float* bottom_float = reinterpret_cast<const float*>(bottom_data);
+      float* top_float = reinterpret_cast<float*>(top_data);
+      const float slope_float = static_cast<float>(slope);
+      const float32x4_t zero = vdupq_n_f32(0.0f);
+      const float32x4_t slope_vec = vdupq_n_f32(slope_float);
+      int i = 0;
+      for (; i + 4 <= count; i += 4) {
+        const float32x4_t value = vld1q_f32(bottom_float + i);
+        const uint32x4_t positive = vcgtq_f32(value, zero);
+        const float32x4_t scaled = vmulq_f32(value, slope_vec);
+        vst1q_f32(top_float + i, vbslq_f32(positive, value, scaled));
+      }
+      for (; i < count; ++i) {
+        const float value = bottom_float[i];
+        top_float[i] = value > 0.0f ? value : slope_float * value;
+      }
+      return;
+    }
+#endif
+    for (int i = 0; i < count; ++i) {
+      const Dtype value = bottom_data[i];
+      top_data[i] = value > Dtype(0) ? value : slope * value;
+    }
+    return;
+  }
+
+  const int num = bottom[0]->shape(0);
+  for (int n = 0; n < num; ++n) {
+    const int num_offset = n * channels * dim;
+    for (int c = 0; c < channels; ++c) {
+      const Dtype slope = slope_data[c];
+      const int offset = num_offset + c * dim;
+#if defined(__aarch64__)
+      if (sizeof(Dtype) == sizeof(float)) {
+        const float* bottom_float = reinterpret_cast<const float*>(bottom_data + offset);
+        float* top_float = reinterpret_cast<float*>(top_data + offset);
+        const float slope_float = static_cast<float>(slope);
+        const float32x4_t zero = vdupq_n_f32(0.0f);
+        const float32x4_t slope_vec = vdupq_n_f32(slope_float);
+        int d = 0;
+        for (; d + 4 <= dim; d += 4) {
+          const float32x4_t value = vld1q_f32(bottom_float + d);
+          const uint32x4_t positive = vcgtq_f32(value, zero);
+          const float32x4_t scaled = vmulq_f32(value, slope_vec);
+          vst1q_f32(top_float + d, vbslq_f32(positive, value, scaled));
+        }
+        for (; d < dim; ++d) {
+          const float value = bottom_float[d];
+          top_float[d] = value > 0.0f ? value : slope_float * value;
+        }
+        continue;
+      }
+#endif
+      for (int d = 0; d < dim; ++d) {
+        const int index = offset + d;
+        const Dtype value = bottom_data[index];
+        top_data[index] = value > Dtype(0) ? value : slope * value;
+      }
+    }
   }
 }
 

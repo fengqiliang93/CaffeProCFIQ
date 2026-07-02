@@ -128,6 +128,23 @@ void ScaleLayer<Dtype>::Forward_cpu(
   const Dtype* scale_data =
       ((bottom.size() > 1) ? bottom[1] : this->blobs_[0].get())->cpu_data();
   Dtype* top_data = top[0]->mutable_cpu_data();
+  if (bias_layer_ && bottom.size() == 1 &&
+      this->blobs_.size() > bias_param_id_ &&
+      scale_dim_ == this->blobs_[bias_param_id_]->count()) {
+    const Dtype* bias_data = this->blobs_[bias_param_id_]->cpu_data();
+    for (int n = 0; n < outer_dim_; ++n) {
+      for (int d = 0; d < scale_dim_; ++d) {
+        const Dtype factor = scale_data[d];
+        const Dtype bias = bias_data[d];
+        for (int i = 0; i < inner_dim_; ++i) {
+          top_data[i] = bottom_data[i] * factor + bias;
+        }
+        bottom_data += inner_dim_;
+        top_data += inner_dim_;
+      }
+    }
+    return;
+  }
   for (int n = 0; n < outer_dim_; ++n) {
     for (int d = 0; d < scale_dim_; ++d) {
       const Dtype factor = scale_data[d];

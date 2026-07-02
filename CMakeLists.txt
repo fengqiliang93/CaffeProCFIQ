@@ -16,6 +16,7 @@ endif()
 set(CFIQ_CPU_ONLY ON CACHE BOOL "Build CPU-only Caffe runtime")
 set(CFIQ_BUILD_TEST ON CACHE BOOL "Build FingerQualityCtrlTest")
 set(CFIQ_STAGE_RUNTIME ON CACHE BOOL "Enable runtime staging target")
+set(CFIQ_AARCH64_CPU "" CACHE STRING "Optional aarch64 -mcpu target, for example neoverse-n1")
 
 set(CFIQ_DEFAULT_DEPS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/deps/${CFIQ_TARGET_ARCH}")
 
@@ -51,6 +52,10 @@ if(CFIQ_TARGET_ARCH STREQUAL "aarch64")
         -L/usr/lib/aarch64-linux-gnu/lapack -llapack
     )
     set(CFIQ_GFORTRAN_LIB "/usr/lib/aarch64-linux-gnu/libgfortran.so.5" CACHE FILEPATH "libgfortran shared library" FORCE)
+    if(CFIQ_AARCH64_CPU)
+        add_compile_options("-mcpu=${CFIQ_AARCH64_CPU}")
+        add_link_options("-mcpu=${CFIQ_AARCH64_CPU}")
+    endif()
 else()
     set(CFIQ_MATH_LIBS
         "${CFIQ_THIRDPART_LIB_DIR}/cblas_LINUX.a"

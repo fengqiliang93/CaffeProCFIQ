@@ -1,4 +1,7 @@
 #include <algorithm>
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 #include <cfloat>
 #include <vector>
 
@@ -151,6 +154,141 @@ void PoolingLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   // loop to save time, although this results in more code.
   switch (this->layer_param_.pooling_param().pool()) {
   case PoolingParameter_PoolMethod_MAX:
+    if (!use_top_mask && kernel_h_ == 2 && kernel_w_ == 2 &&
+        stride_h_ == 2 && stride_w_ == 2 && pad_h_ == 0 && pad_w_ == 0) {
+      mask = max_idx_.mutable_cpu_data();
+      const int bottom_channel_offset = bottom[0]->offset(0, 1);
+      const int top_channel_offset = top[0]->offset(0, 1);
+      for (int n = 0; n < bottom[0]->num(); ++n) {
+        for (int c = 0; c < channels_; ++c) {
+#if defined(__aarch64__)
+          if (sizeof(Dtype) == sizeof(float)) {
+            const float* bottom_float =
+                reinterpret_cast<const float*>(bottom_data);
+            float* top_float = reinterpret_cast<float*>(top_data);
+            for (int ph = 0; ph < pooled_height_; ++ph) {
+              const int h0 = ph * 2;
+              const int h1 = h0 + 1;
+              int pw = 0;
+              if (h1 < height_) {
+                const float* row0 = bottom_float + h0 * width_;
+                const float* row1 = bottom_float + h1 * width_;
+                for (; pw + 3 < pooled_width_ && pw * 2 + 7 < width_;
+                     pw += 4) {
+                  const int w0 = pw * 2;
+                  const float32x4x2_t top_rows = vld2q_f32(row0 + w0);
+                  const float32x4x2_t bottom_rows = vld2q_f32(row1 + w0);
+                  const float32x4_t max_even =
+                      vmaxq_f32(top_rows.val[0], bottom_rows.val[0]);
+                  const float32x4_t max_odd =
+                      vmaxq_f32(top_rows.val[1], bottom_rows.val[1]);
+                  vst1q_f32(top_float + ph * pooled_width_ + pw,
+                            vmaxq_f32(max_even, max_odd));
+                  for (int i = 0; i < 4; ++i) {
+                    const int idx0 = h0 * width_ + w0 + i * 2;
+                    const int idx1 = idx0 + 1;
+                    const int idx2 = idx0 + width_;
+                    const int idx3 = idx2 + 1;
+                    Dtype max_value = bottom_data[idx0];
+                    int max_index = idx0;
+                    if (bottom_data[idx1] > max_value) {
+                      max_value = bottom_data[idx1];
+                      max_index = idx1;
+                    }
+                    if (bottom_data[idx2] > max_value) {
+                      max_value = bottom_data[idx2];
+                      max_index = idx2;
+                    }
+                    if (bottom_data[idx3] > max_value) {
+                      max_index = idx3;
+                    }
+                    mask[ph * pooled_width_ + pw + i] = max_index;
+                  }
+                }
+              }
+              for (; pw < pooled_width_; ++pw) {
+                const int w0 = pw * 2;
+                const int w1 = w0 + 1;
+                const bool has_w1 = w1 < width_;
+                const int idx0 = h0 * width_ + w0;
+                Dtype max_value = bottom_data[idx0];
+                int max_index = idx0;
+                if (has_w1) {
+                  const int idx1 = idx0 + 1;
+                  if (bottom_data[idx1] > max_value) {
+                    max_value = bottom_data[idx1];
+                    max_index = idx1;
+                  }
+                }
+                if (h1 < height_) {
+                  const int idx2 = h1 * width_ + w0;
+                  if (bottom_data[idx2] > max_value) {
+                    max_value = bottom_data[idx2];
+                    max_index = idx2;
+                  }
+                  if (has_w1) {
+                    const int idx3 = idx2 + 1;
+                    if (bottom_data[idx3] > max_value) {
+                      max_value = bottom_data[idx3];
+                      max_index = idx3;
+                    }
+                  }
+                }
+                const int pool_index = ph * pooled_width_ + pw;
+                top_data[pool_index] = max_value;
+                mask[pool_index] = max_index;
+              }
+            }
+            bottom_data += bottom_channel_offset;
+            top_data += top_channel_offset;
+            mask += top_channel_offset;
+            continue;
+          }
+#endif
+          for (int ph = 0; ph < pooled_height_; ++ph) {
+            const int h0 = ph * 2;
+            const int h1 = h0 + 1;
+            const bool has_h1 = h1 < height_;
+            for (int pw = 0; pw < pooled_width_; ++pw) {
+              const int w0 = pw * 2;
+              const int w1 = w0 + 1;
+              const bool has_w1 = w1 < width_;
+              const int idx0 = h0 * width_ + w0;
+              Dtype max_value = bottom_data[idx0];
+              int max_index = idx0;
+              if (has_w1) {
+                const int idx1 = idx0 + 1;
+                if (bottom_data[idx1] > max_value) {
+                  max_value = bottom_data[idx1];
+                  max_index = idx1;
+                }
+              }
+              if (has_h1) {
+                const int idx2 = h1 * width_ + w0;
+                if (bottom_data[idx2] > max_value) {
+                  max_value = bottom_data[idx2];
+                  max_index = idx2;
+                }
+                if (has_w1) {
+                  const int idx3 = idx2 + 1;
+                  if (bottom_data[idx3] > max_value) {
+                    max_value = bottom_data[idx3];
+                    max_index = idx3;
+                  }
+                }
+              }
+              const int pool_index = ph * pooled_width_ + pw;
+              top_data[pool_index] = max_value;
+              mask[pool_index] = max_index;
+            }
+          }
+          bottom_data += bottom_channel_offset;
+          top_data += top_channel_offset;
+          mask += top_channel_offset;
+        }
+      }
+      break;
+    }
     // Initialize
     if (use_top_mask) {
       top_mask = top[1]->mutable_cpu_data();

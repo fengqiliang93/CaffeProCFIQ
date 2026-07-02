@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <vector>
+#include <cmath>
 
 #include "caffe/layers/batch_norm_layer.hpp"
 #include "caffe/util/math_functions.hpp"
@@ -90,6 +91,28 @@ void BatchNormLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   Dtype* top_data = top[0]->mutable_cpu_data();
   int num = bottom[0]->shape(0);
   int spatial_dim = bottom[0]->count()/(bottom[0]->shape(0)*channels_);
+
+  if (use_global_stats_) {
+    const Dtype scale_factor = this->blobs_[2]->cpu_data()[0] == 0 ?
+        0 : 1 / this->blobs_[2]->cpu_data()[0];
+    const Dtype* mean_data = this->blobs_[0]->cpu_data();
+    const Dtype* variance_data = this->blobs_[1]->cpu_data();
+    for (int n = 0; n < num; ++n) {
+      const int num_offset = n * channels_ * spatial_dim;
+      for (int c = 0; c < channels_; ++c) {
+        const Dtype mean = mean_data[c] * scale_factor;
+        const Dtype variance = variance_data[c] * scale_factor;
+        const Dtype inv_std = Dtype(1) / std::sqrt(variance + eps_);
+        const int offset = num_offset + c * spatial_dim;
+        for (int s = 0; s < spatial_dim; ++s) {
+          const int index = offset + s;
+          top_data[index] = (bottom_data[index] - mean) * inv_std;
+        }
+      }
+    }
+    caffe_copy(x_norm_.count(), top_data, x_norm_.mutable_cpu_data());
+    return;
+  }
 
   if (bottom[0] != top[0]) {
     caffe_copy(bottom[0]->count(), bottom_data, top_data);

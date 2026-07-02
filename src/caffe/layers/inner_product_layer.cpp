@@ -1,10 +1,24 @@
+#include <cstdlib>
 #include <vector>
+
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#endif
 
 #include "caffe/filler.hpp"
 #include "caffe/layers/inner_product_layer.hpp"
 #include "caffe/util/math_functions.hpp"
 
 namespace caffe {
+
+namespace {
+
+bool FastInnerProductEnabled() {
+  const char* env = std::getenv("CFIQ_FAST_INNER_PRODUCT");
+  return env == NULL || !(env[0] == '0' && env[1] == '\0');
+}
+
+}
 
 template <typename Dtype>
 void InnerProductLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
@@ -86,6 +100,36 @@ void InnerProductLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   const Dtype* bottom_data = bottom[0]->cpu_data();
   Dtype* top_data = top[0]->mutable_cpu_data();
   const Dtype* weight = this->blobs_[0]->cpu_data();
+#if defined(__aarch64__)
+  if (FastInnerProductEnabled() && M_ == 1 && !transpose_) {
+    const Dtype* bias = bias_term_ ? this->blobs_[1]->cpu_data() : NULL;
+    if (sizeof(Dtype) == sizeof(float)) {
+      const float* bottom_float = reinterpret_cast<const float*>(bottom_data);
+      const float* weight_float = reinterpret_cast<const float*>(weight);
+      float* top_float = reinterpret_cast<float*>(top_data);
+      const float* bias_float = bias_term_ ? reinterpret_cast<const float*>(bias) : NULL;
+      for (int n = 0; n < N_; ++n) {
+        const float* weight_row = weight_float + n * K_;
+        float sum = 0.0f;
+        int k = 0;
+        for (; k + 15 < K_; k += 16) {
+          sum += vaddvq_f32(vmulq_f32(vld1q_f32(bottom_float + k), vld1q_f32(weight_row + k)));
+          sum += vaddvq_f32(vmulq_f32(vld1q_f32(bottom_float + k + 4), vld1q_f32(weight_row + k + 4)));
+          sum += vaddvq_f32(vmulq_f32(vld1q_f32(bottom_float + k + 8), vld1q_f32(weight_row + k + 8)));
+          sum += vaddvq_f32(vmulq_f32(vld1q_f32(bottom_float + k + 12), vld1q_f32(weight_row + k + 12)));
+        }
+        for (; k + 3 < K_; k += 4) {
+          sum += vaddvq_f32(vmulq_f32(vld1q_f32(bottom_float + k), vld1q_f32(weight_row + k)));
+        }
+        for (; k < K_; ++k) {
+          sum += bottom_float[k] * weight_row[k];
+        }
+        top_float[n] = bias_float == NULL ? sum : sum + bias_float[n];
+      }
+      return;
+    }
+  }
+#endif
   caffe_cpu_gemm<Dtype>(CblasNoTrans, transpose_ ? CblasNoTrans : CblasTrans,
       M_, N_, K_, (Dtype)1.,
       bottom_data, weight, (Dtype)0., top_data);
