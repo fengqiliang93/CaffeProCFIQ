@@ -7,6 +7,7 @@
 #include"ForegroundExtractor.h"
 #include"StructDef.h"
 #include"InsideFunctionDef.h"
+#include"QualityScoreUtils.h"
 #include"caffe/net.hpp"
 #include"CFIQ.h"
 using namespace cv;
@@ -15,13 +16,6 @@ using namespace std;
 
 void GetQualityScoreModeFour(void *pForeground, void *pRowColPair, void *pHeatMapFloat, void *pCaffeNet, void *pHInstance, void *pQuality, unsigned char *srcBmp, int width, int height, int fgp, int Core_X, int Core_Y, int localSize, int stepSize, float *QualityScore)
 {
-	int x_correct = Core_X - 320;
-	int y_correct = Core_Y - 256;
-	if (Core_X == 0 && Core_Y == 0)
-	{
-		x_correct = 0;
-		y_correct = 0;
-	}
 	if (pCaffeNet == NULL)
 	{
 		cout << "please pass parameter correctly! The Caffe Net Pointer Is NULL!" << endl;
@@ -42,6 +36,9 @@ void GetQualityScoreModeFour(void *pForeground, void *pRowColPair, void *pHeatMa
 
 	if (!ExtractForeground(pHInstance, srcBmp, width, height, fgp, pForegroundBuffer))
 		return;
+	CFIQUseForegroundCenterWhenCoreMissing(pForegroundBuffer, width, height, &Core_X, &Core_Y);
+	int x_correct = Core_X - 320;
+	int y_correct = Core_Y - 256;
 
 	cv::Mat srcBmpMat(width, height, CV_8UC1, srcBmp);
 	cv::Mat srcBmpFloatMat(width, height, CV_32FC1);
@@ -86,11 +83,11 @@ void GetQualityScoreModeFour(void *pForeground, void *pRowColPair, void *pHeatMa
 		if (rowMinPosition >= 0 && rowMinPosition + localSize < height && colMinPosition >= 0 && colMinPosition + localSize < width)
 		{
 			if (pRowColPairStruct[localRankCount].Rank == 1)
-				score += 1;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank);
 			else if (pRowColPairStruct[localRankCount].Rank == 2)
-				score += 2;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank);
 			else if (pRowColPairStruct[localRankCount].Rank == 3)
-				score += 3;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank);
 		}
 		if (pRowColPairStruct[localRankCount].Rank == 1)
 		{
@@ -133,7 +130,7 @@ void GetQualityScoreModeFour(void *pForeground, void *pRowColPair, void *pHeatMa
 	TotalCut = TotalCut > localRankNum ? TotalCut : localRankNum;
 	if (TotalCut > 0)
 	{
-		*QualityScore = score * 1.0f / (3 * TotalCut);
+		*QualityScore = score * 1.0f / (CFIQ_MAX_RANK_WEIGHT * TotalCut);
 		if (*QualityScore > 1.0f)
 			*QualityScore = 1.0f;
 	}

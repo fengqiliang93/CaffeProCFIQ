@@ -39,7 +39,41 @@ x86_64-cmake/
 - 当前完整发布包中的测试工具 `FingerQualityCtrlTest` 需要 `GLIBC_2.38`。
 - `libQualityCtrl.so` 本体需要到 `GLIBC_2.34`。
 - 运行机器不要求安装 gcc/g++ 编译器，但系统 C/C++ 运行时必须满足上述版本。
-- OpenCV、protobuf、nirvana kernel 等运行库已随包放在 `lib/` 下，不要求系统额外安装。
+- OpenCV、protobuf、nirvana kernel 等核心运行库已随包放在 `lib/` 下；OpenCV 间接依赖的系统图形/影像运行库仍需要在新机安装。
+
+### Ubuntu 24.04 新机运行依赖
+
+在全新 Ubuntu 24.04 x86_64 机器上，先安装系统运行时依赖：
+
+```bash
+sudo apt update
+sudo apt install -y \
+  ca-certificates \
+  libstdc++6 \
+  libgcc-s1 \
+  libc6 \
+  libgomp1 \
+  libglib2.0-0 \
+  libglx0 \
+  libglvnd0 \
+  libgl1 \
+  libx11-6 \
+  libxext6 \
+  libsm6 \
+  libice6 \
+  libtbb12 \
+  libgdcm3.0 \
+  libopenjp2-7 \
+  libopenexr-3-1-30 \
+  libgdal34
+sudo ldconfig
+```
+
+说明：
+
+- Ubuntu 24.04 可能自动选择 `libglib2.0-0t64`、`libgdcm3.0t64`、`libgdal34t64`，这是正常的 `t64` 包名变体。
+- 上述依赖覆盖已验证缺失库：`libGLX.so.0`、`libtbb.so.12`、`libgdcmMSFF.so.3.0`、`libgdcmDSED.so.3.0`、`libopenjp2.so.7`、`libOpenEXR-3_1.so.30`、`libgdal.so.34`。
+- 如果 `apt` 提示包名不存在，先执行 `apt-cache search libgdcm`、`apt-cache search libgdal`、`apt-cache search openexr` 查询当前源中的实际包名。
 
 环境检查：
 
@@ -47,6 +81,7 @@ x86_64-cmake/
 uname -m
 ldd --version | head -1
 strings /usr/lib/x86_64-linux-gnu/libstdc++.so.6 | grep GLIBCXX_3.4.32
+ldconfig -p | grep -E 'libGLX.so.0|libtbb.so.12|libgdcmMSFF.so.3.0|libgdcmDSED.so.3.0|libopenjp2.so.7|libOpenEXR-3_1.so.30|libgdal.so.34'
 ```
 
 ## 3. 环境配置步骤
@@ -55,8 +90,19 @@ strings /usr/lib/x86_64-linux-gnu/libstdc++.so.6 | grep GLIBCXX_3.4.32
 
 ```bash
 cd x86_64-cmake/test
-export LD_LIBRARY_PATH=../lib
+export LD_LIBRARY_PATH="../lib:$PWD${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+ldd ./FingerQualityCtrlTest | grep "not found" || true
+ldd ../lib/*.so* | grep "not found" || true
 ```
+
+如果将 `test/`、`lib/` 内容合并到同一个业务目录，例如 JNI 调用目录，则在该目录下使用：
+
+```bash
+export LD_LIBRARY_PATH="$PWD/lib:$PWD${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+ldd ./lib/*.so* | grep "not found" || true
+```
+
+上述 `ldd` 命令没有输出 `not found` 才表示运行库解析完整。
 
 检查核心库：
 
@@ -91,7 +137,7 @@ FingerQualityCtrlTest <deploy.prototxt> <caffemodel> <source-bmp-dir> <mode> <th
 
 ```bash
 cd x86_64-cmake/test
-export LD_LIBRARY_PATH=../lib
+export LD_LIBRARY_PATH="../lib:$PWD${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 CFIQ_INLINE_THREAD=1 ./FingerQualityCtrlTest \
   ./FQNet_model/deploy.prototxt \
   ./FQNet_model/_iter_50000.caffemodel \

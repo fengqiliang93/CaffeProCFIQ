@@ -7,6 +7,7 @@
 #include"ForegroundExtractor.h"
 #include"StructDef.h"
 #include"InsideFunctionDef.h"
+#include"QualityScoreUtils.h"
 #include"caffe/net.hpp"
 #include"CFIQ.h"
 using namespace cv;
@@ -74,17 +75,17 @@ void GetQualityScoreModeFive(void *pForeground, void *pRowColPair, void *pHeatMa
 
 		if (pRowColPairStruct[localRankCount].Rank == 1)
 		{
-			score += 1;
+			score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank);
 			BadRankMat(Range(pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].RowID + localSize), Range(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].ColID + localSize)) += 1;
 		}
 		else if (pRowColPairStruct[localRankCount].Rank == 2)
 		{
-			score += 2;
+			score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank);
 			MiddleRankMat(Range(pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].RowID + localSize), Range(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].ColID + localSize)) += 1;
 		}
 		else if (pRowColPairStruct[localRankCount].Rank == 3)
 		{
-			score += 3;
+			score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank);
 			GoodRankMat(Range(pRowColPairStruct[localRankCount].RowID, pRowColPairStruct[localRankCount].RowID + localSize), Range(pRowColPairStruct[localRankCount].ColID, pRowColPairStruct[localRankCount].ColID + localSize)) += 1;
 		}
 	}
@@ -93,7 +94,7 @@ void GetQualityScoreModeFive(void *pForeground, void *pRowColPair, void *pHeatMa
 	TotalCut = TotalCut > localRankNum ? TotalCut : localRankNum;
 	if (TotalCut > 0)
 	{
-		*QualityScore = score * 1.0f / (3 * TotalCut);
+		*QualityScore = score * 1.0f / (CFIQ_MAX_RANK_WEIGHT * TotalCut);
 		if (*QualityScore > 1.0f)
 			*QualityScore = 1.0f;
 	}

@@ -17,6 +17,7 @@
 #include"ForegroundExtractor.h"
 #include"StructDef.h"
 #include"InsideFunctionDef.h"
+#include"QualityScoreUtils.h"
 #include"caffe/net.hpp"
 #include"CFIQ.h"
 using namespace cv;
@@ -81,13 +82,6 @@ static void DrawPatchGridModeThree(cv::Mat &qualityMat,
 void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeatMapFloat, void *pCaffeNet, void *pHInstance, void *pQuality, unsigned char *srcBmp, int width, int height, int fgp, int Core_X, int Core_Y, int localSize, int stepSize, float *QualityScore)
 {
 	const bool traceQuality = TraceQualityModeThree();
-	int x_correct = Core_X - 320;
-	int y_correct = Core_Y - 256;
-	if (Core_X == 0 && Core_Y == 0)
-	{
-		x_correct = 0;
-		y_correct = 0;
-	}
 
 	if (pCaffeNet == NULL)
 	{
@@ -113,6 +107,9 @@ void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeat
 
 	if (!ExtractForeground(pHInstance, srcBmp, width, height, fgp, pForegroundBuffer))
 		return;
+	CFIQUseForegroundCenterWhenCoreMissing(pForegroundBuffer, width, height, &Core_X, &Core_Y);
+	int x_correct = Core_X - 320;
+	int y_correct = Core_Y - 256;
 	
 	cv::Mat srcBmpMat(width, height, CV_8UC1, srcBmp);
 	//cv::imwrite(".\\srcbmp\\" + string(pPersonID) + "_" + to_string(fgp) + "_" + "src" + ".bmp", srcBmpMat);
@@ -174,17 +171,17 @@ void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeat
 			if (pRowColPairStruct[localRankCount].Rank == 1)
 			{
 				heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
-				score += 1 * heatMap;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 			}
 			else if (pRowColPairStruct[localRankCount].Rank == 2)
 			{
 				heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
-				score += 2 * heatMap;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 			}
 			else if (pRowColPairStruct[localRankCount].Rank == 3)
 			{
 				heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
-				score += 3 * heatMap;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 			}
 		}
 		if (pRowColPairStruct[localRankCount].Rank == 1)
@@ -229,7 +226,7 @@ void  GetQualityScoreModeThree(void *pForeground, void *pRowColPair, void *pHeat
 	TotalCut = std::max(TotalCut, localRankNum);
 	if (abs(meanHeatMap) > 1e-6 && TotalCut > 0)
 	{
-		*QualityScore = score / (3 * TotalCut * meanHeatMap);
+		*QualityScore = score / (CFIQ_MAX_RANK_WEIGHT * TotalCut * meanHeatMap);
 		if (*QualityScore > 1.0f)
 			*QualityScore = 1.0f;
 	}

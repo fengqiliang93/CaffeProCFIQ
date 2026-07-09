@@ -18,6 +18,7 @@
 #include"ForegroundExtractor.h"
 #include"StructDef.h"
 #include"InsideFunctionDef.h"
+#include"QualityScoreUtils.h"
 #include"caffe/net.hpp"
 #include"CFIQ.h"
 using namespace cv;
@@ -75,9 +76,6 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 		{
 			fprintf(stderr, "[quality-six] begin fgp=%d core=(%d,%d) local=%d step=%d\n", fgp, Core_X, Core_Y, localSize, stepSize);
 		}
-		int x_correct = Core_X - 320;
-		int y_correct = Core_Y - 256;
-
 		if (pCaffeNet == NULL)
 		{
 			cout << "please pass parameter correctly! The Caffe Net Pointer Is NULL!" << endl;
@@ -110,6 +108,9 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 		profileStepBegin = std::chrono::steady_clock::now();
 		if (!ExtractForeground(pHInstance, srcBmp, width, height, fgp, pForegroundBuffer))
 			return;
+		CFIQUseForegroundCenterWhenCoreMissing(pForegroundBuffer, width, height, &Core_X, &Core_Y);
+		int x_correct = Core_X - 320;
+		int y_correct = Core_Y - 256;
 		if (profileQuality)
 		{
 			msExtractForeground += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
@@ -216,7 +217,7 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 					{
 						msHeatMapMean += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
 					}
-					score += 1 * heatMap;
+					score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 				}
 				else if (pRowColPairStruct[localRankCount].Rank == 2)
 				{
@@ -226,7 +227,7 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 					{
 						msHeatMapMean += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
 					}
-					score += 2 * heatMap;
+					score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 				}
 				else if (pRowColPairStruct[localRankCount].Rank == 3)
 				{
@@ -236,7 +237,7 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 					{
 						msHeatMapMean += QualityModeSixElapsedMs(profileStepBegin, std::chrono::steady_clock::now());
 					}
-					score += 3 * heatMap;
+					score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 				}
 			}
 		}
@@ -273,7 +274,7 @@ void GetQualityScoreModeSix(void *pForeground, void *pRowColPair, void *pHeatMap
 		int TotalCut = ((y_EndRow - y_BegRow - localSize) / stepSize + 1 + 1) * ((x_EndCol - x_BegCol - localSize) / stepSize + 1 + 1); //适当增大切割数
 		if (abs(meanHeatMap) > 1e-6 && TotalCut > 0)
 		{
-			*QualityScore = score / (3 * TotalCut * meanHeatMap);
+			*QualityScore = score / (CFIQ_MAX_RANK_WEIGHT * TotalCut * meanHeatMap);
 			if (*QualityScore > 1.0f)
 				*QualityScore = 1.0f;
 		}

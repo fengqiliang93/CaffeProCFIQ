@@ -13,6 +13,7 @@
 #include"ForegroundExtractor.h"
 #include"StructDef.h"
 #include"InsideFunctionDef.h"
+#include"QualityScoreUtils.h"
 #include"caffe/net.hpp"
 #include"CFIQ.h"
 using namespace cv;
@@ -24,9 +25,6 @@ using namespace std;
 */
 void  GetQualityScoreModeOne(void *pForeground, void *pRowColPair, void *pHeatMapFloat, void *pCaffeNet, void *pHInstance, void *pQuality, unsigned char *srcBmp, int width, int height, int fgp, int Core_X, int Core_Y, int localSize, int stepSize, float *QualityScore)
 {
-	int x_correct = Core_X - 320;
-	int y_correct = Core_Y - 256;
-
 	if (pCaffeNet == NULL)
 	{
 		cout << "please pass parameter correctly! The Caffe Net Pointer Is NULL!" << endl;
@@ -48,6 +46,9 @@ void  GetQualityScoreModeOne(void *pForeground, void *pRowColPair, void *pHeatMa
 
 	if (!ExtractForeground(pHInstance, srcBmp, width, height, fgp, pForegroundBuffer))
 		return;
+	CFIQUseForegroundCenterWhenCoreMissing(pForegroundBuffer, width, height, &Core_X, &Core_Y);
+	int x_correct = Core_X - 320;
+	int y_correct = Core_Y - 256;
 	cv::Mat srcBmpMat(width, height, CV_8UC1, srcBmp);
 	//cv::imwrite(".\\srcbmp\\" + string(pPersonID) + "_" + to_string(fgp) + "_" + "src" + ".bmp", srcBmpMat);
 	//cv::Mat_<float> srcBmpFloatMat = srcBmpMat * 1.0f / 255.0f;
@@ -102,19 +103,19 @@ void  GetQualityScoreModeOne(void *pForeground, void *pRowColPair, void *pHeatMa
 			{
 				BadRankMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)) += 1;
 				heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
-				score += 1 * heatMap;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 			}
 			else if (pRowColPairStruct[localRankCount].Rank == 2)
 			{
 				MiddleRankMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)) += 1;
 				heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
-				score += 2 * heatMap;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 			}
 			else if (pRowColPairStruct[localRankCount].Rank == 3)
 			{
 				GoodRankMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)) += 1;
 				heatMap = cv::mean(QualityBmpMat(Range(rowMinPosition, rowMinPosition + localSize), Range(colMinPosition, colMinPosition + localSize)))[0];
-				score += 3 * heatMap;
+				score += CFIQRankWeight(pRowColPairStruct[localRankCount].Rank) * heatMap;
 			}
 		}
 	}
@@ -147,7 +148,7 @@ void  GetQualityScoreModeOne(void *pForeground, void *pRowColPair, void *pHeatMa
 	int TotalCut = ((y_EndRow - y_BegRow - localSize) / stepSize + 1 + 1) * ((x_EndCol - x_BegCol - localSize) / stepSize + 1 + 1); //适当增大切割数
 	if (abs(meanHeatMap) > 1e-6 && TotalCut > 0)
 	{
-		*QualityScore = score / (3 * TotalCut * meanHeatMap);
+		*QualityScore = score / (CFIQ_MAX_RANK_WEIGHT * TotalCut * meanHeatMap);
 		if (*QualityScore > 1.0f)
 			*QualityScore = 1.0f;
 	}

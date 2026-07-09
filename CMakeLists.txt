@@ -39,9 +39,18 @@ set(CFIQ_OPENCV_LIB_DIR "${CFIQ_DEPS_ROOT}/opencv_lib")
 
 set(CFIQ_PROTOBUF_LIB "${CFIQ_THIRDPART_LIB_DIR}/libprotobuf.so.26.0.6" CACHE FILEPATH "protobuf shared library")
 set(CFIQ_GFORTRAN_LIB "${CFIQ_THIRDPART_LIB_DIR}/libgfortran.so" CACHE FILEPATH "libgfortran shared library")
-set(CFIQ_OPENCV_CORE_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_core.so.3.2" CACHE FILEPATH "OpenCV core library")
-set(CFIQ_OPENCV_IMGCODECS_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_imgcodecs.so.3.2" CACHE FILEPATH "OpenCV imgcodecs library")
-set(CFIQ_OPENCV_IMGPROC_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_imgproc.so.3.2" CACHE FILEPATH "OpenCV imgproc library")
+if(CFIQ_TARGET_ARCH STREQUAL "aarch64")
+    set(CFIQ_DEFAULT_OPENCV_CORE_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_core.so.4.6.0")
+    set(CFIQ_DEFAULT_OPENCV_IMGCODECS_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_imgcodecs.so.4.6.0")
+    set(CFIQ_DEFAULT_OPENCV_IMGPROC_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_imgproc.so.4.6.0")
+else()
+    set(CFIQ_DEFAULT_OPENCV_CORE_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_core.so.3.2")
+    set(CFIQ_DEFAULT_OPENCV_IMGCODECS_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_imgcodecs.so.3.2")
+    set(CFIQ_DEFAULT_OPENCV_IMGPROC_LIB "${CFIQ_OPENCV_LIB_DIR}/libopencv_imgproc.so.3.2")
+endif()
+set(CFIQ_OPENCV_CORE_LIB "${CFIQ_DEFAULT_OPENCV_CORE_LIB}" CACHE FILEPATH "OpenCV core library")
+set(CFIQ_OPENCV_IMGCODECS_LIB "${CFIQ_DEFAULT_OPENCV_IMGCODECS_LIB}" CACHE FILEPATH "OpenCV imgcodecs library")
+set(CFIQ_OPENCV_IMGPROC_LIB "${CFIQ_DEFAULT_OPENCV_IMGPROC_LIB}" CACHE FILEPATH "OpenCV imgproc library")
 
 set(CFIQ_NIRVANA_KERNEL_LIB "${CFIQ_DEPS_ROOT}/nirvana_lib/libnirvana-kernel.so.8.15.1" CACHE FILEPATH "nirvana kernel library")
 
@@ -52,6 +61,7 @@ if(CFIQ_TARGET_ARCH STREQUAL "aarch64")
         -L/usr/lib/aarch64-linux-gnu/lapack -llapack
     )
     set(CFIQ_GFORTRAN_LIB "/usr/lib/aarch64-linux-gnu/libgfortran.so.5" CACHE FILEPATH "libgfortran shared library" FORCE)
+    set(CFIQ_STAGE_GFORTRAN_LIB "${CFIQ_THIRDPART_LIB_DIR}/libgfortran.so.5.0.0")
     if(CFIQ_AARCH64_CPU)
         add_compile_options("-mcpu=${CFIQ_AARCH64_CPU}")
         add_link_options("-mcpu=${CFIQ_AARCH64_CPU}")
@@ -61,6 +71,7 @@ else()
         "${CFIQ_THIRDPART_LIB_DIR}/cblas_LINUX.a"
         "${CFIQ_THIRDPART_LIB_DIR}/blas_LINUX.a"
     )
+    set(CFIQ_STAGE_GFORTRAN_LIB "${CFIQ_GFORTRAN_LIB}")
 endif()
 
 foreach(required_file
